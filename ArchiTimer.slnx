@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="ArchiTimer/ArchiTimer.csproj" />
+  <Project Path="ArchiTimer.SmokeTests/ArchiTimer.SmokeTests.csproj" />
+</Solution>
