@@ -30,6 +30,8 @@
                                       Foreground="#172026" Background="#FFFFFF" FontWeight="SemiBold" />
                         </Border>
                         <Button Content="コンパクト表示" Click="CompactButton_Click" />
+                        <Button Content="{Binding TaskbarButtonLabel}" Click="TaskbarButton_Click"
+                                ToolTip="実行中タイマーの経過時間または残り時間をWindowsタスクバーに表示します" />
                     </StackPanel>
                 </DockPanel>
             </Border>
@@ -49,7 +51,8 @@
                                     <Setter Property="Foreground" Value="#172026" />
                                 </Style>
                             </Border.Resources>
-                            <StackPanel>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel Margin="0,0,8,0">
                                 <TextBlock Text="新しい作業" FontSize="20" FontWeight="SemiBold" />
                                 <TextBlock Text="作業名" Foreground="#AEB4B7" Margin="0,18,0,5" />
                                 <TextBox Text="{Binding NewTimerName, UpdateSourceTrigger=PropertyChanged}" />
@@ -62,7 +65,14 @@
                                     <TextBox Text="{Binding NewMinutes}" Width="62" />
                                     <TextBlock Text="分" VerticalAlignment="Center" Margin="6,0,0,0" />
                                 </StackPanel>
-                                <TextBlock Text="ポモドーロは25分集中／5分休憩です。ストップウォッチは0秒から積算します。通常タイマーは99時間以上も設定できます。"
+                                <TextBlock Text="ポモドーロの時間" Foreground="#AEB4B7" Margin="0,14,0,5" />
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBox Text="{Binding NewPomodoroFocusMinutes}" Width="62" />
+                                    <TextBlock Text="分 集中" VerticalAlignment="Center" Margin="6,0,12,0" />
+                                    <TextBox Text="{Binding NewPomodoroBreakMinutes}" Width="62" />
+                                    <TextBlock Text="分 休憩" VerticalAlignment="Center" Margin="6,0,0,0" />
+                                </StackPanel>
+                                <TextBlock Text="ポモドーロの時間は1～999分で設定できます。ストップウォッチは0秒から積算し、通常タイマーは99時間以上も設定できます。"
                                            Foreground="#8F979B" TextWrapping="Wrap" FontSize="12" Margin="0,12" />
                                 <Button Content="タイマーを開始" Command="{Binding AddTimerCommand}"
                                         Background="{StaticResource AccentBrush}" Foreground="#17130E" FontWeight="Bold" />
@@ -70,6 +80,7 @@
                                 <TextBlock Text="{Binding StatusMessage}" Foreground="#9A5100"
                                            TextWrapping="Wrap" Margin="4,12,4,0" />
                             </StackPanel>
+                            </ScrollViewer>
                         </Border>
 
                         <Grid Grid.Column="2">
@@ -104,8 +115,7 @@
                                                 </StackPanel>
                                                 <WrapPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right">
                                                     <Button Content="{Binding ToggleLabel}" Command="{Binding DataContext.ToggleTimerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
-                                                    <Button Content="+10分" Visibility="{Binding ShowAddTime, Converter={StaticResource BoolVisibility}}" Command="{Binding DataContext.AddTenMinutesCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
-                                                    <Button Content="作業完了" Background="{StaticResource AccentBrush}" Foreground="#17130E" Visibility="{Binding ShowFinish, Converter={StaticResource BoolVisibility}}" Command="{Binding DataContext.FinishStopwatchCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
+                                                    <Button Content="作業完了" Background="{StaticResource AccentBrush}" Foreground="#17130E" Visibility="{Binding ShowFinish, Converter={StaticResource BoolVisibility}}" Command="{Binding DataContext.FinishTimerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
                                                     <Button Content="削除" Foreground="#FFB3AD" Command="{Binding DataContext.DeleteTimerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
                                                 </WrapPanel>
                                             </Grid>
@@ -120,22 +130,82 @@
                 <TabItem Header="プリセット">
                     <Grid Margin="12">
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                        <TextBlock Text="保存した作業プリセット" FontSize="21" FontWeight="SemiBold" Margin="0,0,0,12" />
-                        <ListBox Grid.Row="1" ItemsSource="{Binding Presets}">
+                        <DockPanel Margin="2,0,2,16" LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Left">
+                                <TextBlock Text="保存した作業プリセット" Foreground="#172026"
+                                           FontSize="21" FontWeight="SemiBold" />
+                                <TextBlock Text="よく使う作業を、同じ設定ですぐに開始できます"
+                                           Foreground="#66737A" FontSize="12" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <Border DockPanel.Dock="Right" Background="#E7ECEF" BorderBrush="#B8C3C9"
+                                    BorderThickness="1" CornerRadius="12" Padding="10,4"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding Presets.Count, StringFormat='保存済み {0}件'}"
+                                           Foreground="#445159" FontSize="12" FontWeight="SemiBold" />
+                            </Border>
+                        </DockPanel>
+                        <ListBox Grid.Row="1" ItemsSource="{Binding Presets}"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+                                    <Setter Property="BorderThickness" Value="0" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Margin" Value="0" />
+                                    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="#26343C" />
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter Property="Background" Value="#2B3B44" />
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <Border Background="{StaticResource PanelBrush}" CornerRadius="8" Padding="16" Margin="0,0,0,8">
-                                        <DockPanel>
-                                            <StackPanel DockPanel.Dock="Left">
-                                                <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold" />
-                                                <TextBlock Text="{Binding Description}" Foreground="#9DA4A8" />
+                                    <Border Background="{Binding Background, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                            BorderBrush="#3E5664" BorderThickness="1" CornerRadius="10"
+                                            Margin="0,0,0,10" ClipToBounds="True">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="5" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <Border Background="{StaticResource AccentBrush}" />
+
+                                            <StackPanel Grid.Column="1" Margin="18,15,20,15" VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Name}" Foreground="#F7F9FA"
+                                                               FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                    <Border Background="#303A40" BorderBrush="#536671" BorderThickness="1"
+                                                            CornerRadius="10" Padding="9,2" Margin="12,0,0,0">
+                                                        <TextBlock Text="{Binding Mode}" Foreground="#D7DEE2"
+                                                                   FontSize="11" FontWeight="SemiBold" />
+                                                    </Border>
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding Description}" Foreground="#AEB9BF"
+                                                           FontSize="13" Margin="0,7,0,0" />
                                             </StackPanel>
-                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                                                <Button Content="開始" Background="{StaticResource AccentBrush}" Foreground="#17130E"
-                                                        Command="{Binding DataContext.StartPresetCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
-                                                <Button Content="削除" Command="{Binding DataContext.DeletePresetCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
-                                            </StackPanel>
-                                        </DockPanel>
+
+                                            <Border Grid.Column="2" BorderBrush="#35464F" BorderThickness="1,0,0,0"
+                                                    Padding="14,11" VerticalAlignment="Stretch">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Button Content="この設定で開始" Background="{StaticResource AccentBrush}"
+                                                            Foreground="#17130E" FontWeight="Bold" Padding="15,8"
+                                                            Command="{Binding DataContext.StartPresetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding}" />
+                                                    <Button Content="削除" Background="Transparent" Foreground="#FFB3AD"
+                                                            BorderBrush="#6B4949" BorderThickness="1" Padding="12,7"
+                                                            Command="{Binding DataContext.DeletePresetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                            CommandParameter="{Binding}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
                                     </Border>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
@@ -146,17 +216,50 @@
                 <TabItem Header="履歴">
                     <Grid Margin="12">
                         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                        <DockPanel Margin="0,0,0,12">
-                            <TextBlock Text="完了した作業" FontSize="21" FontWeight="SemiBold" />
-                            <Button DockPanel.Dock="Right" Content="履歴を消去" Command="{Binding ClearHistoryCommand}" />
+                        <DockPanel Margin="0,0,0,12" LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Left">
+                                <TextBlock Text="完了した作業" FontSize="21" FontWeight="SemiBold" />
+                                <TextBlock Text="行をクリックまたはドラッグして、削除する履歴を選択できます"
+                                           Foreground="#66737A" FontSize="12" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Content="すべて選択" Click="SelectAllHistoryButton_Click" />
+                                <Button Content="選択解除" Click="ClearHistorySelectionButton_Click" />
+                                <Button x:Name="DeleteSelectedHistoryButton" Content="選択した履歴を削除"
+                                        IsEnabled="False" Background="#6B3333" Foreground="#FFF2F0"
+                                        Click="DeleteSelectedHistoryButton_Click" />
+                            </StackPanel>
                         </DockPanel>
-                        <DataGrid Grid.Row="1" ItemsSource="{Binding History}" AutoGenerateColumns="False" IsReadOnly="True"
-                                  Background="{StaticResource PanelBrush}" Foreground="#1B1F22" GridLinesVisibility="Horizontal">
+                        <DataGrid x:Name="HistoryGrid" Grid.Row="1" ItemsSource="{Binding History}"
+                                  AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False"
+                                  CanUserDeleteRows="False" SelectionMode="Extended" SelectionUnit="FullRow"
+                                  Background="{StaticResource PanelBrush}" Foreground="#1B1F22"
+                                  RowBackground="#F7F9FA" AlternatingRowBackground="#E7ECEF" AlternationCount="2"
+                                  GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#CBD3D7"
+                                  SelectionChanged="HistoryGrid_SelectionChanged"
+                                  PreviewMouseLeftButtonDown="HistoryGrid_PreviewMouseLeftButtonDown"
+                                  PreviewMouseMove="HistoryGrid_PreviewMouseMove"
+                                  PreviewMouseLeftButtonUp="HistoryGrid_PreviewMouseLeftButtonUp"
+                                  LostMouseCapture="HistoryGrid_LostMouseCapture">
+                            <DataGrid.RowStyle>
+                                <Style TargetType="DataGridRow">
+                                    <Setter Property="Foreground" Value="#172026" />
+                                    <Style.Triggers>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+                                            <Setter Property="Foreground" Value="#17130E" />
+                                            <Setter Property="FontWeight" Value="SemiBold" />
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </DataGrid.RowStyle>
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="完了日時" Binding="{Binding CompletedAtLocal}" Width="180" />
                                 <DataGridTextColumn Header="作業" Binding="{Binding Name}" Width="*" />
                                 <DataGridTextColumn Header="種類" Binding="{Binding Kind}" Width="150" />
-                                <DataGridTextColumn Header="時間" Binding="{Binding DurationLabel}" Width="120" />
+                                <DataGridTextColumn Header="合計時間" Binding="{Binding DurationLabel}" Width="110" />
+                                <DataGridTextColumn Header="作業時間" Binding="{Binding WorkDurationLabel}" Width="110" />
+                                <DataGridTextColumn Header="休憩時間" Binding="{Binding BreakDurationLabel}" Width="110" />
                             </DataGrid.Columns>
                         </DataGrid>
                     </Grid>

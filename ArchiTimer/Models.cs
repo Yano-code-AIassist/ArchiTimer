@@ -53,6 +53,10 @@ public sealed class TimerItem : ObservableObject
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public long OriginalDurationSeconds { get; set; }
+    public long PomodoroFocusSeconds { get; set; } = 25 * 60;
+    public long PomodoroBreakSeconds { get; set; } = 5 * 60;
+    public long PomodoroFocusElapsedSeconds { get; set; }
+    public long PomodoroBreakElapsedSeconds { get; set; }
 
     public string Name { get => _name; set => SetProperty(ref _name, value); }
     public TimerMode Mode { get => _mode; set { if (SetProperty(ref _mode, value)) RefreshLabels(); } }
@@ -108,14 +112,16 @@ public sealed class TimerItem : ObservableObject
         _ => "再スタート"
     };
 
-    public bool ShowAddTime => Mode != TimerMode.ストップウォッチ;
-    public bool ShowFinish => Mode == TimerMode.ストップウォッチ && State != TimerState.Completed;
+    public bool ShowFinish => State != TimerState.Completed;
 
-    public static TimerItem Create(string name, TimerMode mode, long durationSeconds)
+    public static TimerItem Create(string name, TimerMode mode, long durationSeconds,
+        long pomodoroFocusSeconds = 25 * 60, long pomodoroBreakSeconds = 5 * 60)
     {
+        pomodoroFocusSeconds = Math.Max(60, pomodoroFocusSeconds);
+        pomodoroBreakSeconds = Math.Max(60, pomodoroBreakSeconds);
         var seconds = mode switch
         {
-            TimerMode.ポモドーロ => 25 * 60,
+            TimerMode.ポモドーロ => pomodoroFocusSeconds,
             TimerMode.ストップウォッチ => 0,
             _ => Math.Max(60, durationSeconds)
         };
@@ -125,6 +131,8 @@ public sealed class TimerItem : ObservableObject
             Name = name,
             Mode = mode,
             Phase = PomodoroPhase.Focus,
+            PomodoroFocusSeconds = pomodoroFocusSeconds,
+            PomodoroBreakSeconds = pomodoroBreakSeconds,
             OriginalDurationSeconds = seconds,
             RemainingSeconds = seconds,
             State = TimerState.Running,
@@ -157,21 +165,17 @@ public sealed class TimerItem : ObservableObject
                 break;
             case TimerState.Completed:
                 Phase = PomodoroPhase.Focus;
+                if (Mode == TimerMode.ポモドーロ)
+                {
+                    PomodoroFocusElapsedSeconds = 0;
+                    PomodoroBreakElapsedSeconds = 0;
+                    OriginalDurationSeconds = PomodoroFocusSeconds;
+                }
                 RemainingSeconds = OriginalDurationSeconds;
                 EndAtUtc = DateTimeOffset.UtcNow.AddSeconds(RemainingSeconds);
                 State = TimerState.Running;
                 break;
         }
-        RefreshLabels();
-    }
-
-    public void AddTime(TimeSpan amount)
-    {
-        if (Mode == TimerMode.ストップウォッチ) return;
-        var seconds = (long)amount.TotalSeconds;
-        RemainingSeconds += seconds;
-        if (State == TimerState.Running && EndAtUtc is not null) EndAtUtc = EndAtUtc.Value.AddSeconds(seconds);
-        if (State == TimerState.Completed) State = TimerState.Paused;
         RefreshLabels();
     }
 
@@ -196,21 +200,27 @@ public sealed class TimerItem : ObservableObject
             ? "通常タイマー"
             : Phase == PomodoroPhase.Focus ? "ポモドーロ・集中" : "ポモドーロ・休憩";
         var completedDuration = OriginalDurationSeconds;
+        var completedWorkDuration = 0L;
+        var completedBreakDuration = 0L;
         var message = $"「{Name}」が終了しました。";
 
         if (Mode == TimerMode.ポモドーロ)
         {
             if (Phase == PomodoroPhase.Focus)
             {
+                PomodoroFocusElapsedSeconds += completedDuration;
+                completedWorkDuration = completedDuration;
                 CompletedRounds++;
                 Phase = PomodoroPhase.Break;
-                OriginalDurationSeconds = 5 * 60;
-                message = $"「{Name}」の集中時間が終了しました。5分休憩です。";
+                OriginalDurationSeconds = PomodoroBreakSeconds;
+                message = $"「{Name}」の集中時間が終了しました。{FormatMinutes(PomodoroBreakSeconds)}分休憩です。";
             }
             else
             {
+                PomodoroBreakElapsedSeconds += completedDuration;
+                completedBreakDuration = completedDuration;
                 Phase = PomodoroPhase.Focus;
-                OriginalDurationSeconds = 25 * 60;
+                OriginalDurationSeconds = PomodoroFocusSeconds;
                 message = $"「{Name}」の休憩が終了しました。集中を再開します。";
             }
 
@@ -224,11 +234,21 @@ public sealed class TimerItem : ObservableObject
         }
 
         RefreshLabels();
-        return new TimerEvent(Name, completedKind, completedDuration, nowUtc, message);
+        return new TimerEvent(Name, completedKind, completedDuration, nowUtc, message,
+            completedWorkDuration, completedBreakDuration);
     }
 
     public void NormalizeAfterLoad()
     {
+        PomodoroFocusSeconds = Math.Max(60, PomodoroFocusSeconds);
+        PomodoroBreakSeconds = Math.Max(60, PomodoroBreakSeconds);
+        if (Mode == TimerMode.ポモドーロ && PomodoroFocusElapsedSeconds == 0
+            && PomodoroBreakElapsedSeconds == 0 && CompletedRounds > 0)
+        {
+            PomodoroFocusElapsedSeconds = (long)CompletedRounds * PomodoroFocusSeconds;
+            var completedBreaks = Phase == PomodoroPhase.Focus ? CompletedRounds : CompletedRounds - 1;
+            PomodoroBreakElapsedSeconds = (long)Math.Max(0, completedBreaks) * PomodoroBreakSeconds;
+        }
         if (Mode == TimerMode.ストップウォッチ)
         {
             if (AccumulatedSeconds == 0 && RemainingSeconds > 0) AccumulatedSeconds = RemainingSeconds;
@@ -244,6 +264,49 @@ public sealed class TimerItem : ObservableObject
     private long SecondsUntilEnd() => EndAtUtc is null
         ? RemainingSeconds
         : Math.Max(0, (long)Math.Ceiling((EndAtUtc.Value - DateTimeOffset.UtcNow).TotalSeconds));
+
+    private static long FormatMinutes(long seconds) => Math.Max(1, seconds / 60);
+
+    public TimerEvent? Finish(DateTimeOffset nowUtc)
+    {
+        if (State == TimerState.Completed) return null;
+        if (Mode == TimerMode.ストップウォッチ) return FinishStopwatch(nowUtc);
+
+        if (State == TimerState.Running && EndAtUtc is not null)
+            RemainingSeconds = Math.Max(0, (long)Math.Ceiling((EndAtUtc.Value - nowUtc).TotalSeconds));
+
+        var currentPhaseElapsed = Math.Max(0, OriginalDurationSeconds - RemainingSeconds);
+        long workDuration;
+        long breakDuration;
+        string kind;
+
+        if (Mode == TimerMode.ポモドーロ)
+        {
+            workDuration = PomodoroFocusElapsedSeconds;
+            breakDuration = PomodoroBreakElapsedSeconds;
+            if (Phase == PomodoroPhase.Focus) workDuration += currentPhaseElapsed;
+            else breakDuration += currentPhaseElapsed;
+            PomodoroFocusElapsedSeconds = workDuration;
+            PomodoroBreakElapsedSeconds = breakDuration;
+            kind = "ポモドーロ";
+        }
+        else
+        {
+            workDuration = 0;
+            breakDuration = 0;
+            kind = "通常タイマー";
+        }
+
+        State = TimerState.Completed;
+        EndAtUtc = null;
+        RemainingSeconds = 0;
+        RefreshLabels();
+        var totalDuration = Mode == TimerMode.ポモドーロ
+            ? workDuration + breakDuration
+            : currentPhaseElapsed;
+        return new TimerEvent(Name, kind, totalDuration, nowUtc, $"「{Name}」の作業を完了しました。",
+            workDuration, breakDuration);
+    }
 
     public TimerEvent? FinishStopwatch(DateTimeOffset nowUtc)
     {
@@ -292,12 +355,12 @@ public sealed class TimerItem : ObservableObject
         OnPropertyChanged(nameof(ModeLabel));
         OnPropertyChanged(nameof(StateLabel));
         OnPropertyChanged(nameof(ToggleLabel));
-        OnPropertyChanged(nameof(ShowAddTime));
         OnPropertyChanged(nameof(ShowFinish));
     }
 }
 
-public sealed record TimerEvent(string Name, string Kind, long DurationSeconds, DateTimeOffset CompletedAtUtc, string Message);
+public sealed record TimerEvent(string Name, string Kind, long DurationSeconds, DateTimeOffset CompletedAtUtc,
+    string Message, long WorkDurationSeconds = 0, long BreakDurationSeconds = 0);
 
 public sealed class TimerPreset
 {
@@ -305,18 +368,25 @@ public sealed class TimerPreset
     public string Name { get; set; } = "設計作業";
     public TimerMode Mode { get; set; }
     public long DurationSeconds { get; set; }
+    public long PomodoroFocusSeconds { get; set; } = 25 * 60;
+    public long PomodoroBreakSeconds { get; set; } = 5 * 60;
     public string Description => Mode switch
     {
-        TimerMode.ポモドーロ => "ポモドーロ 25分集中／5分休憩",
+        TimerMode.ポモドーロ => $"ポモドーロ {FormatMinutes(GetPomodoroFocusSeconds())}分集中／{FormatMinutes(GetPomodoroBreakSeconds())}分休憩",
         TimerMode.ストップウォッチ => "0秒から作業時間を計測",
         _ => $"通常タイマー {Format(DurationSeconds)}"
     };
+
+    public long GetPomodoroFocusSeconds() => Math.Max(60, PomodoroFocusSeconds);
+    public long GetPomodoroBreakSeconds() => Math.Max(60, PomodoroBreakSeconds);
 
     private static string Format(long seconds)
     {
         var span = TimeSpan.FromSeconds(seconds);
         return $"{(long)span.TotalHours:00}:{span.Minutes:00}:{span.Seconds:00}";
     }
+
+    private static long FormatMinutes(long seconds) => Math.Max(1, seconds / 60);
 }
 
 public sealed class HistoryEntry
@@ -325,6 +395,8 @@ public sealed class HistoryEntry
     public string Name { get; set; } = "";
     public string Kind { get; set; } = "";
     public long DurationSeconds { get; set; }
+    public long WorkDurationSeconds { get; set; }
+    public long BreakDurationSeconds { get; set; }
     public DateTimeOffset CompletedAtUtc { get; set; }
     public string CompletedAtLocal => CompletedAtUtc.ToLocalTime().ToString("yyyy/MM/dd HH:mm");
     public string DurationLabel
@@ -335,6 +407,19 @@ public sealed class HistoryEntry
             return $"{(long)span.TotalHours:00}:{span.Minutes:00}:{span.Seconds:00}";
         }
     }
+    public string WorkDurationLabel => IsPomodoro ? FormatDuration(EffectiveWorkDurationSeconds) : "—";
+    public string BreakDurationLabel => IsPomodoro ? FormatDuration(EffectiveBreakDurationSeconds) : "—";
+
+    private bool IsPomodoro => Kind.StartsWith("ポモドーロ", StringComparison.Ordinal);
+    private long EffectiveWorkDurationSeconds => WorkDurationSeconds == 0 && BreakDurationSeconds == 0
+        && Kind == "ポモドーロ・集中" ? DurationSeconds : WorkDurationSeconds;
+    private long EffectiveBreakDurationSeconds => WorkDurationSeconds == 0 && BreakDurationSeconds == 0
+        && Kind == "ポモドーロ・休憩" ? DurationSeconds : BreakDurationSeconds;
+    private static string FormatDuration(long seconds)
+    {
+        var span = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return $"{(long)span.TotalHours:00}:{span.Minutes:00}:{span.Seconds:00}";
+    }
 }
 
 public sealed class AppData
@@ -343,4 +428,6 @@ public sealed class AppData
     public List<TimerPreset> Presets { get; set; } = [];
     public List<HistoryEntry> History { get; set; } = [];
     public bool AlwaysOnTop { get; set; }
+    public int PomodoroFocusMinutes { get; set; } = 25;
+    public int PomodoroBreakMinutes { get; set; } = 5;
 }
